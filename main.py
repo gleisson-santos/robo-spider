@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware  # Adicione esta importação
 from pydantic import BaseModel
 from telethon import TelegramClient
 from telethon.tl.functions.channels import InviteToChannelRequest
@@ -14,6 +15,15 @@ import io
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = FastAPI()
+
+# Adicionar middleware CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permite todas as origens (ajuste conforme necessário)
+    allow_credentials=True,
+    allow_methods=["*"],  # Permite todos os métodos, incluindo OPTIONS
+    allow_headers=["*"],  # Permite todos os cabeçalhos
+)
 
 # Modelo de dados para a requisição
 class Account(BaseModel):
@@ -63,6 +73,8 @@ async def add_members(client, target_entity, members):
                 await client(InviteToChannelRequest(target_entity, [user_to_add]))
                 yield f"Adicionado: {member.username or member.first_name}\n"
                 await asyncio.sleep(10)
+            else:
+                yield f"Usuário {member.username or member.first_name} é um bot ou inválido, pulando...\n"
         except Exception as e:
             yield f"Erro ao adicionar {member.username or member.first_name}: {e}\n"
             await asyncio.sleep(5)
@@ -108,4 +120,6 @@ async def process_request(request: ProcessRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    port = int(os.getenv("PORT", 8000))  # Usa a porta fornecida pelo Render ou 8000 como fallback
+    uvicorn.run(app, host="0.0.0.0", port=port)
