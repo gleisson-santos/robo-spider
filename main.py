@@ -87,18 +87,24 @@ async def add_members(client, target_entity, members):
             yield f"Erro ao adicionar {member.username or member.first_name}: {e}\n"
             await asyncio.sleep(5)
 
-async def process_account(account: Account, credentials: Credentials, source_groups: List[str], target_group: str):
+async def process_account(account: Account, credentials: Credentials, source_groups: List[str], target_group: str, requires_code: bool = False):
     try:
         client = TelegramClient(account.session, int(credentials.api_id), credentials.api_hash)
-        clients[account.phone] = client  # Armazenar o cliente para uso posterior
+        if not requires_code:
+            clients[account.phone] = client  # Armazenar o cliente apenas na primeira tentativa
 
-        # Tentar iniciar a sessão sem fornecer o código inicialmente
+        client = clients[account.phone]
         await client.connect()
+
         if not await client.is_user_authorized():
-            yield f"Solicitando código de verificação para a conta {account.phone}\n"
-            await client.send_code_request(account.phone)
-            yield {"type": "code_request", "phone": account.phone}  # Sinalizar que o código é necessário
-            return  # Parar aqui e esperar o código
+            if not requires_code:
+                yield f"Solicitando código de verificação para a conta {account.phone}\n"
+                await client.send_code_request(account.phone)
+                yield {"type": "code_request", "phone": account.phone}
+                return  # Parar aqui e esperar o código
+            else:
+                yield f"Erro: Código de verificação já foi solicitado, mas a autenticação ainda não foi concluída para {account.phone}\n"
+                return
 
         yield f"Conectado com a conta {account.phone}\n"
 
@@ -122,9 +128,8 @@ async def process_account(account: Account, credentials: Credentials, source_gro
     except Exception as e:
         yield f"Erro na conta {account.phone}: {e}\n"
     finally:
-        if account.phone in clients:
-            await clients[account.phone].disconnect()
-            del clients[account.phone]
+        # Não desconectar aqui; desconectar apenas após o processamento completo ou no submit-code
+        pass
 
 @app.post("/api/process")
 async def process_request(request: ProcessRequest):
@@ -137,6 +142,7 @@ async def process_request(request: ProcessRequest):
         for account in request.accounts:
             async for log in process_account(account, request.credentials, request.sourceGroups, request.targetGroup):
                 yield log
+            # Não desconectar aqui; manter a sessão ativa até o submit-code ou o processamento completo
             yield f"Processamento concluído para a conta {account.phone}\n"
             await asyncio.sleep(30)
 
@@ -156,12 +162,32 @@ async def submit_code(request: CodeRequest):
             yield f"Tentando autenticar a conta {phone} com o código {code}\n"
             await client.sign_in(phone, code)
             yield f"Autenticação bem-sucedida para a conta {phone}\n"
+
+            # Após a autenticação bem-sucedida, continuar o processamento
+            # Simular uma nova requisição para process_account, mas agora com requires_code=True
+            dummy_credentials = Credentials(api_id="dummy", api_hash="dummy")  # Substituir por valores reais se necessário
+            dummy_source_groups = ["@dummygroup"]  # Substituir por valores reais se necessário
+            dummy_target_group = "@dummytarget"  # Substituir por valores reais se necessário
+            async for log in process_account(
+                Account(phone=phone, session=client.session.name),
+                dummy_credentials,
+                dummy_source_groups,
+                dummy_target_group,
+                requires_code=True
+            ):
+                yield log
+
         except PhoneCodeInvalidError:
             yield f"Erro: Código de verificação inválido para a conta {phone}\n"
         except SessionPasswordNeededError:
             yield f"Erro: Autenticação de dois fatores necessária para a conta {phone}. Isso não é suportado no momento.\n"
         except Exception as e:
             yield f"Erro ao autenticar a conta {phone}: {e}\n"
+        finally:
+            # Desconectar o cliente após o processamento ou erro
+            if phone in clients:
+                await clients[phone].disconnect()
+                del clients[phone]
 
     return StreamingResponse(stream_logs(), media_type="text/plain")
 
