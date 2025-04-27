@@ -10,7 +10,7 @@ import csv
 from typing import List, Dict
 import io
 
-# Configurar logging
+# Configurar loggingghghg
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = FastAPI()
