@@ -50,10 +50,10 @@ async def extract_members(client, source_entity):
             ])
         yield f"Total de membros extraídos: {len(members)}\n"
         yield f"Membros salvos em memória\n"
-        return members
+        yield {"type": "members", "data": members}  # Enviar membros via yield
     except Exception as e:
         yield f"Erro ao extrair membros: {e}\n"
-        return []
+        yield {"type": "members", "data": []}  # Enviar lista vazia em caso de erro
 
 async def add_members(client, target_entity, members):
     for member in members:
@@ -79,10 +79,11 @@ async def process_account(account: Account, credentials: Credentials, source_gro
             yield f"Grupo de origem: {source_entity.title}, Grupo de destino: {target_entity.title}\n"
 
             members = []
-            async for log in extract_members(client, source_entity):
-                yield log
-                if "Total de membros extraídos" in log:
-                    members = await client.get_participants(source_entity, limit=10000)
+            async for result in extract_members(client, source_entity):
+                if isinstance(result, dict) and result.get("type") == "members":
+                    members = result["data"]
+                else:
+                    yield result  # Enviar logs para o frontend
 
             if members:
                 async for log in add_members(client, target_entity, members):
